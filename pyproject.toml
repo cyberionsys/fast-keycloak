@@ -1,0 +1,69 @@
+[tool.poetry]
+name = "fast-keycloak"
+version = "1.0.0"
+description = "This projects goal is to ease the integration of Keycloak (OpenID Connect) with Python, especially FastAPI. FastAPI is not necessary but is encouraged due to specific features. Currently, this package supports only the password and the authorization_code. However, the get_current_user() method accepts any JWT that was signed using Keycloak´s private key"
+authors = ["Cyberion Systems <contact@cyberionsys.com>"]
+classifiers = [
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python",
+    "Topic :: Internet",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development",
+    "Typing :: Typed",
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Framework :: AsyncIO",
+    "Framework :: FastAPI",
+    "Framework :: Pydantic",
+    "Framework :: Pydantic :: 1",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: System :: Systems Administration :: Authentication/Directory"
+]
+license = "MIT"
+readme = "README.md"
+homepage = "https://github.com/cyberionsys/fast-keycloak"
+repository = "https://github.com/cyberionsys/fast-keycloak"
+keywords = ["fastapi", "keycloak"]
+
+[tool.poetry.dependencies]
+fastapi = "^0.109.0"
+pydantic = "^2.6.0"
+python = "^3.12"
+python-jose = "^3.3.0"
+requests = "^2.31.0"
+
+[tool.poetry.group.test]
+optional = true
+
+[tool.poetry.group.test.dependencies]
+anyio = "^4.2.0"
+httpretty = "^1.1.4"
+pytest = "^8.0.0"
+pytest-cov = "^4.1.0"
+uvicorn = { extras=["standard"], version="^0.27.0.post1" }
+
+[tool.coverage.run]
+parallel = true
+source = [
+    "fast_keycloak",
+    "tests"
+]
+omit = ["*/setup*"]
+
+[tool.pytest.ini_options]
+addopts = "-x -p no:warnings --cov-report=term-missing --cov-report=term --cov-report=xml:./coverage.xml --no-cov-on-fail --cov=fast_keycloak"
+testpaths = ["tests"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

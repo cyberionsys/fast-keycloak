@@ -1,0 +1,32 @@
+version: '3'
+
+services:
+  postgres:
+    image: 'postgres:16'
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: testkeycloakuser
+      POSTGRES_PASSWORD: testkeycloakpassword
+    restart:
+      always
+
+  keycloak:
+    image: 'quay.io/keycloak/keycloak:23.0'
+    volumes:
+      - ./realm-export.json:/opt/keycloak/data/import/realm-export.json
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_HTTP_ENABLED: true
+      KC_DB: postgres
+      KC_DB_URL_HOST: postgres
+      KC_DB_USERNAME: testkeycloakuser
+      KC_DB_PASSWORD: testkeycloakpassword
+      KC_HOSTNAME: localhost
+      KEYCLOAK_ADMIN: keycloakuser
+      KEYCLOAK_ADMIN_PASSWORD: keycloakpassword
+    ports:
+      - '8085:8080'
+    depends_on:
+      - postgres
+    restart:
+      always
