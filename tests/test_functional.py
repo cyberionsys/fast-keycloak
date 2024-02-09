@@ -17,7 +17,7 @@ from fast_keycloak.model import (
     KeycloakRole,
     KeycloakToken,
     KeycloakUser,
-    OIDCUser,
+    OIDCUser, KeycloakClient, KeycloakClientProtocol,
 )
 from tests import BaseTestClass
 
@@ -79,6 +79,43 @@ class TestAPIFunctional(BaseTestClass):
         assert isinstance(user_bob, KeycloakUser)
         assert len(idp.get_all_users()) == 2
         return user_alice, user_bob
+
+    def test_clients(self, idp):
+        all_clients = idp.list_clients()
+        assert len(all_clients) == 7
+        all_clients_ids = [client.clientId for client in all_clients]
+        assert 'admin-cli' in all_clients_ids
+        assert 'test-client' in all_clients_ids
+
+        admin_client = idp.get_client_by_uuid('f8f4baad-a231-4a6a-b97c-5d68ac147279')
+        assert admin_client is not None
+        assert admin_client.clientId == 'admin-cli'
+        assert admin_client.secret.get_secret_value() == 'BIcczGsZ6I8W5zf0rZg5qSexlloQLPKB'
+
+        test_client = idp.get_client_by_id('test-client')
+        assert test_client is not None
+        assert test_client.id == '9a76b2ec-b33e-40b0-9cad-e00ca7e77e40'
+        assert test_client.secret.get_secret_value() == 'GzgACcJzhzQ4j8kWhmhazt7WSdxDVUyE'
+
+        client = KeycloakClient(
+            clientId='new-client',
+            serviceAccountsEnabled=True,
+            authorizationServicesEnabled=True,
+            frontchannelLogout=False,
+            protocol=KeycloakClientProtocol.OPENID_CONNECT
+        )
+        new_client = idp.create_client(client)
+        assert new_client is not None
+        assert new_client.id is not None
+        assert new_client.access is not None
+
+        new_client.name = "This is an updated client"
+        new_client.secret = "GzgACcJzhzQ4j8kWhmhazt7WSdxDVUyE"
+        updated_client = idp.update_client(new_client)
+        assert updated_client is not None
+        assert updated_client.id == new_client.id
+        assert updated_client.name == new_client.name
+        assert updated_client.secret.get_secret_value() == new_client.secret
 
     def test_roles(self, idp, users):
         user_alice, user_bob = users

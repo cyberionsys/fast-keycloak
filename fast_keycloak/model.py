@@ -1,7 +1,13 @@
-from enum import Enum
-from typing import List, Optional
+from enum import Enum, StrEnum
+from typing import List, Optional, Any
 
-from pydantic import BaseModel, SecretStr, Field
+from pydantic import (
+    AliasChoices,
+    BaseModel as PydanticBaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+)
 
 from fast_keycloak.exceptions import KeycloakError
 
@@ -20,6 +26,122 @@ class HTTPMethod(Enum):
     POST = "post"
     DELETE = "delete"
     PUT = "put"
+
+
+class KeycloakClientAuthenticatorTypes(StrEnum):
+    CLIENT_SECRET = "client-secret"
+    CLIENT_JWT = "client-jwt"
+
+
+class KeycloakClientProtocol(StrEnum):
+    OPENID_CONNECT = "openid-connect"
+    SAML = "saml"
+
+
+class BaseModel(PydanticBaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+
+class KeycloakProtocolMapperConfig(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra='allow')
+
+    multivalued: Optional[bool] = None
+    aggregateAttributes: Optional[bool] = Field(
+        default=None,
+        validation_alias=AliasChoices("aggregateAttributes", "aggregate.attrs"),
+        serialization_alias="aggregate.attrs"
+    )
+    showInUserinfo: Optional[bool] = Field(
+        default=None,
+        validation_alias=AliasChoices("showInUserinfo", "userinfo.token.claim"),
+        serialization_alias="userinfo.token.claim"
+    )
+    showInIntrospectionToken: Optional[bool] = Field(
+        default=None,
+        validation_alias=AliasChoices("showInIntrospectionToken", "introspection.token.claim"),
+        serialization_alias="introspection.token.claim"
+    )
+    showInIdToken: Optional[bool] = Field(
+        default=None,
+        validation_alias=AliasChoices("showInIdToken", "id.token.claim"),
+        serialization_alias="id.token.claim"
+    )
+    showInAccessToken: Optional[bool] = Field(
+        default=None,
+        validation_alias=AliasChoices("showInAccessToken", "access.token.claim"),
+        serialization_alias="access.token.claim"
+    )
+    claimName: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("claimName", "claim.name"),
+        serialization_alias="claim.name"
+    )
+    jsonTypeLabel: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("jsonTypeLabel", "jsonType.label"),
+        serialization_alias="jsonType.label"
+    )
+
+
+class KeycloakProtocolMapper(BaseModel):
+    id: Optional[str] = None
+    name: str
+    protocol: KeycloakClientProtocol
+    protocolMapper: str
+    consentRequired: bool = False
+    config: Optional[KeycloakProtocolMapperConfig] = None
+
+
+class KeycloakClientAccess(BaseModel):
+    view: bool = True
+    configure: bool = True
+    manage: bool = True
+
+
+class KeycloakClient(BaseModel):
+    id: Optional[str] = None
+    clientId: str
+    name: str = ""
+    description: str = ""
+    rootUrl: str = ""
+    adminUrl: str = ""
+    baseUrl: str = ""
+    surrogateAuthRequired: bool = False
+    enabled: bool = True
+    alwaysDisplayInConsole: bool = False
+    clientAuthenticatorType: KeycloakClientAuthenticatorTypes = KeycloakClientAuthenticatorTypes.CLIENT_SECRET
+    secret: Optional[SecretStr] = None
+    registrationAccessToken: Optional[SecretStr] = None
+    defaultRoles: Optional[list[str]] = None
+    redirectUris: list[str] = ['/*']
+    webOrigins: list[str] = ['/*']
+    notBefore: int = 0
+    bearerOnly: bool = False
+    consentRequired: bool = False
+    standardFlowEnabled: bool = True
+    implicitFlowEnabled: bool = False
+    directAccessGrantsEnabled: bool = True
+    serviceAccountsEnabled: bool = False
+    authorizationServicesEnabled: Optional[bool] = False
+    directGrantsOnly: Optional[bool] = None
+    publicClient: bool = False
+    frontchannelLogout: bool = True
+    protocol: KeycloakClientProtocol
+    attributes: dict[str, Any] = None
+    authenticationFlowBindingOverrides: dict[str, Any] = {}
+    fullScopeAllowed: bool = True
+    nodeReRegistrationTimeout: int = -1
+    registeredNodes: Optional[dict[str, int]] = None
+    protocolMappers: Optional[list[KeycloakProtocolMapper]] = None
+    clientTemplate: Optional[str] = None
+    useTemplateConfig: Optional[bool] = None
+    useTemplateScope: Optional[bool] = None
+    useTemplateMappers: Optional[bool] = None
+    defaultClientScopes: Optional[list[str]] = None
+    optionalClientScopes: Optional[list[str]] = None
+    authorizationSettings: Optional[dict[str, Any]] = None
+    access: Optional[KeycloakClientAccess] = None
+    origin: Optional[str] = None
 
 
 class KeycloakUser(BaseModel):

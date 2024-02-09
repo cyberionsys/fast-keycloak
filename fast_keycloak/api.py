@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 import json
 from collections.abc import Callable
+from http import HTTPStatus
 from json import JSONDecodeError
 from typing import Any, List, Optional, Type, Union
 from urllib.parse import urlencode
@@ -32,24 +33,28 @@ from fast_keycloak.model import (
     KeycloakRole,
     KeycloakToken,
     KeycloakUser,
-    OIDCUser,
+    OIDCUser, KeycloakClient,
 )
 
 
 def result_or_error(
-        response_model: Type[BaseModel] = None, is_list: bool = False
-) -> List[BaseModel] or BaseModel or KeycloakError:
+        response_model: Type[BaseModel] = None,
+        is_list: bool = False,
+        pick_list_item: int = None
+) -> List[BaseModel] or BaseModel or KeycloakError or IndexError:
     """Decorator used to ease the handling of responses from Keycloak.
 
     Args:
         response_model (Type[BaseModel]): Object that should be returned based on the payload
         is_list (bool): True if the return value should be a list of the response model provided
+        pick_list_item (int): Item to pick if the response is a list
 
     Returns:
         BaseModel or List[BaseModel]: Based on the given signature and response circumstances
 
     Raises:
         KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        IndexError: If pick_list_item is out of bounds
 
     Notes:
         - Keycloak sometimes returns empty payloads but describes the error in its content (byte encoded)
@@ -85,7 +90,15 @@ def result_or_error(
 
                 else:  # Response model given
                     if is_list:
-                        return create_list(result.json())
+                        items = create_list(result.json())
+                        if pick_list_item is None:
+                            return items
+                        elif pick_list_item >= 0:
+                            if pick_list_item > len(items) + 1:
+                                raise IndexError(f"Index {pick_list_item} is out of range")
+                            return items[pick_list_item]
+                        else:
+                            raise IndexError(f"Index {pick_list_item} is out of range")
                     else:
                         return create_object(result.json())
 
@@ -375,6 +388,75 @@ class FastKeycloak:
         public_key = response.json()["public_key"]
         return f"-----BEGIN PUBLIC KEY-----\n{public_key}\n-----END PUBLIC KEY-----"
 
+    @result_or_error(response_model=KeycloakClient, is_list=True)
+    def list_clients(self) -> List[KeycloakClient]:
+        """List clients
+
+        Returns:
+            list: list of clients
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
+        return self._admin_request(url=self.clients_uri, method=HTTPMethod.GET)
+
+    @result_or_error(response_model=KeycloakClient)
+    def get_client_by_uuid(self, uuid: str) -> KeycloakClient:
+        """Get the client with the specified UUID
+
+        Args:
+            uuid str: the client UUID
+
+        Returns:
+            KeycloakClient:The corresponding client
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
+        return self._admin_request(url=f"{self.clients_uri}/{uuid}", method=HTTPMethod.GET)
+
+    @result_or_error(response_model=KeycloakClient, is_list=True, pick_list_item=0)
+    def get_client_by_id(self, client_id: str) -> KeycloakClient:
+        return self._admin_request(url=f"{self.clients_uri}?clientId={client_id}", method=HTTPMethod.GET)
+
+    @result_or_error(response_model=KeycloakClient)
+    def create_client(self, client: KeycloakClient) -> KeycloakClient:
+        """Create a client on the realm
+
+        Args:
+            client (KeycloakClient): Keycloak client data
+
+        Returns:
+            KeycloakClient: If creation succeeded, else it will return the error
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
+        data = {
+            key: value for key, value in client.model_dump(by_alias=True).items()
+            if value is not None
+        }
+        response = self._admin_request(url=self.clients_uri, data=data, method=HTTPMethod.POST)
+        if response.status_code == 201:
+            return self.get_client_by_id(client.clientId)
+        else:
+            return response
+
+    @result_or_error(response_model=KeycloakClient)
+    def update_client(self, client: KeycloakClient) -> KeycloakClient:
+        if client.id is None:
+            raise KeycloakError(status_code=HTTPStatus.BAD_REQUEST, reason="Client UUID is required")
+
+        data = {
+            key: value for key, value in client.model_dump(by_alias=True).items()
+            if value is not None
+        }
+        response = self._admin_request(url=f"{self.clients_uri}/{client.id}", data=data, method=HTTPMethod.PUT)
+        if response.status_code == 204:
+            return self.get_client_by_uuid(client.id)
+        else:
+            return response
+
     @result_or_error()
     def add_user_roles(self, roles: List[str], user_id: str) -> dict:
         """Adds roles to a specific user
@@ -556,7 +638,6 @@ class FastKeycloak:
             KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
         """
         return self._admin_request(url=f"{self.groups_uri}/{group_id}", method=HTTPMethod.GET)
-
 
     @result_or_error(response_model=KeycloakGroup, is_list=True)
     def _retrieve_subgroups(self, group: KeycloakGroup) -> List[KeycloakGroup] | None:
@@ -1095,6 +1176,11 @@ class FastKeycloak:
     def realm_uri(self):
         """The realm's endpoint URL"""
         return f"{self.server_url}/realms/{self.realm}"
+
+    @functools.cached_property
+    def clients_uri(self):
+        """The clients endpoint URL"""
+        return self.admin_uri(resource="clients")
 
     @functools.cached_property
     def users_uri(self):
