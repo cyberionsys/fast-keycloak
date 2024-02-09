@@ -1162,6 +1162,72 @@ class FastKeycloak:
             url=f"{self.auth_scope_uri}/{scope_id}", method=models.HTTPMethod.DELETE
         )
 
+    @result_or_error(response_model=models.KeycloakAuthPolicy, is_list=True)
+    def list_auth_policies(self) -> List[models.KeycloakAuthPolicy]:
+        return self._admin_request(url=f"{self.auth_policy_uri}?permission=false", method=models.HTTPMethod.GET)
+
+    @result_or_error(response_model=models.KeycloakAuthPolicy)
+    def get_auth_policy_by_type_and_id(
+            self,
+            policy_type: models.KeycloakAuthPolicyType,
+            policy_id: str
+    ) -> models.KeycloakAuthPolicy:
+        return self._admin_request(
+            url=f"{self.auth_policy_typed_uri(policy_type)}/{policy_id}",
+            method=models.HTTPMethod.GET
+        )
+
+    @result_or_error(response_model=models.KeycloakAuthPolicy, is_list=True)
+    def _get_aggregate_auth_policy_dependencies(self, policy_id: str) -> List[models.KeycloakAuthPolicy]:
+        return self._admin_request(
+            url=f"{self.auth_policy_typed_uri(models.KeycloakAuthPolicyType.AGGREGATE)}/{policy_id}/associatedPolicies",
+            method=models.HTTPMethod.GET
+        )
+
+    def get_aggregate_auth_policy_with_dependencies(self, policy_id: str) -> models.KeycloakAuthPolicy:
+        policy_type = models.KeycloakAuthPolicyType.AGGREGATE
+        policy = self.get_auth_policy_by_type_and_id(policy_type, policy_id)
+        # Retrieved associated policies
+        associated_policies = self._get_aggregate_auth_policy_dependencies(policy_id)
+        policy.policies = [p.id for p in associated_policies]
+        return policy
+
+    @result_or_error(response_model=models.KeycloakAuthPolicy)
+    def create_auth_policy(self, policy: models.KeycloakAuthPolicy) -> models.KeycloakAuthPolicy:
+        data = {
+            key: value for key, value in policy.model_dump().items()
+            if value is not None
+        }
+        return self._admin_request(
+            url=f"{self.auth_policy_typed_uri(policy.type)}",
+            method=models.HTTPMethod.POST,
+            data=data
+        )
+
+    @result_or_error(response_model=models.KeycloakAuthPolicy)
+    def update_auth_policy(self, policy: models.KeycloakAuthPolicy) -> models.KeycloakAuthPolicy:
+        if not policy.id:
+            raise KeycloakError(status_code=HTTPStatus.BAD_REQUEST, reason="ID not found for policy")
+
+        data = {
+            key: value for key, value in policy.model_dump().items()
+            if value is not None
+        }
+        response = self._admin_request(
+            url=f"{self.auth_policy_typed_uri(policy.type)}/{policy.id}",
+            method=models.HTTPMethod.PUT,
+            data=data
+        )
+
+        if response.status_code == 201:
+            return self.get_auth_policy_by_type_and_id(policy.type, policy.id)
+        else:
+            return response
+
+    @result_or_error()
+    def delete_auth_policy(self, policy_id: str):
+        return self._admin_request(url=f"{self.auth_policy_uri}/{policy_id}", method=models.HTTPMethod.DELETE)
+
     def _admin_request(
             self,
             url: str,
@@ -1317,6 +1383,13 @@ class FastKeycloak:
     @functools.cached_property
     def auth_scope_uri(self) -> str:
         return self._resource_server_uri('scope')
+
+    @functools.cached_property
+    def auth_policy_uri(self) -> str:
+        return self._resource_server_uri('policy')
+
+    def auth_policy_typed_uri(self, policy_type: models.KeycloakAuthPolicyType) -> str:
+        return f"{self.auth_policy_uri}/{policy_type}"
 
     def __str__(self):
         """String representation"""

@@ -17,7 +17,8 @@ from fast_keycloak.model import (
     KeycloakRole,
     KeycloakToken,
     KeycloakUser,
-    OIDCUser, KeycloakClient, KeycloakClientProtocol, KeycloakAuthScope,
+    OIDCUser, KeycloakClient, KeycloakClientProtocol, KeycloakAuthScope, KeycloakAuthPolicy, KeycloakAuthPolicyLogic,
+    KeycloakAuthPolicyType, IdAndRequired, KeycloakAuthPolicyStrategy,
 )
 from tests import BaseTestClass
 
@@ -477,6 +478,93 @@ class TestAPIFunctional(BaseTestClass):
 
         scope = idp.get_auth_scope_by_name("notexistingscope")
         assert scope is None
+
+    def test_auth_policies(self, idp, users):
+        # Create a client policy
+        policy = KeycloakAuthPolicy(
+            name="Client Policy",
+            type=KeycloakAuthPolicyType.CLIENT,
+            logic=KeycloakAuthPolicyLogic.POSITIVE,
+            clients=[idp.client_uuid]
+        )
+        client_policy = idp.create_auth_policy(policy)
+        assert client_policy is not None
+        assert client_policy.id is not None
+        assert client_policy.type == KeycloakAuthPolicyType.CLIENT
+        assert client_policy.logic == KeycloakAuthPolicyLogic.POSITIVE
+
+        # Create a user policy
+        user_alice, user_bob = users
+        policy = KeycloakAuthPolicy(
+            name="User Policy",
+            type=KeycloakAuthPolicyType.USER,
+            logic=KeycloakAuthPolicyLogic.NEGATIVE,
+            users=[user_alice.id, user_bob.id]
+        )
+        user_policy = idp.create_auth_policy(policy)
+        assert user_policy is not None
+        assert user_policy.id is not None
+        assert user_policy.logic == KeycloakAuthPolicyLogic.NEGATIVE
+        assert len(user_policy.users) == 2
+
+        # Create Role Policy
+        basic_roles = [
+            role for role in idp.list_roles()
+            if role.name in ["default-roles-test", "offline_access", "uma_authorization"]
+        ]
+        assert len(basic_roles) == 3
+
+        policy = KeycloakAuthPolicy(
+            name="Role Policy",
+            type=KeycloakAuthPolicyType.ROLE,
+            logic=KeycloakAuthPolicyLogic.NEGATIVE,
+            roles=[
+                IdAndRequired(id=basic_roles[0].id, required=True),
+                IdAndRequired(id=basic_roles[1].id),
+                IdAndRequired(id=basic_roles[2].id)
+            ]
+        )
+        role_policy = idp.create_auth_policy(policy)
+        assert role_policy is not None
+        assert role_policy.id is not None
+        assert role_policy.logic == KeycloakAuthPolicyLogic.NEGATIVE
+        assert len(role_policy.roles) == 3
+
+        # Create aggregate policy
+        policy = KeycloakAuthPolicy(
+            name="Aggregate Policy",
+            type=KeycloakAuthPolicyType.AGGREGATE,
+            logic=KeycloakAuthPolicyLogic.POSITIVE,
+            decisionStrategy=KeycloakAuthPolicyStrategy.AFFIRMATIVE,
+            policies=[client_policy.id, user_policy.id, role_policy.id]
+        )
+        aggregate_policy = idp.create_auth_policy(policy)
+        assert aggregate_policy is not None
+        assert aggregate_policy.id is not None
+        assert aggregate_policy.logic == KeycloakAuthPolicyLogic.POSITIVE
+        assert aggregate_policy.decisionStrategy == KeycloakAuthPolicyStrategy.AFFIRMATIVE
+        assert len(aggregate_policy.policies) == 3
+
+        aggregate_policy.decisionStrategy = KeycloakAuthPolicyStrategy.UNANIMOUS
+        result = idp.update_auth_policy(aggregate_policy)
+        assert result.id == aggregate_policy.id
+        assert result.decisionStrategy == KeycloakAuthPolicyStrategy.UNANIMOUS
+
+        all_policies = idp.list_auth_policies()
+        assert len(all_policies) == 4
+        for policy in all_policies:
+            assert policy.id in [client_policy.id, user_policy.id, role_policy.id, aggregate_policy.id]
+
+        policy = idp.get_auth_policy_by_type_and_id(KeycloakAuthPolicyType.AGGREGATE, aggregate_policy.id)
+        assert policy.id == aggregate_policy.id
+
+        policy = idp.get_aggregate_auth_policy_with_dependencies(policy.id)
+        assert policy.id == aggregate_policy.id
+        assert len(policy.policies) == 3
+        for policy in policy.policies:
+            assert policy in aggregate_policy.policies
+
+        idp.delete_auth_policy(aggregate_policy.id)
 
     @pytest.mark.parametrize(
         "action, exception",

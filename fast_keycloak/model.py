@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import Enum, StrEnum
 from typing import List, Optional, Any
 
@@ -6,7 +7,7 @@ from pydantic import (
     BaseModel as PydanticBaseModel,
     ConfigDict,
     Field,
-    SecretStr,
+    SecretStr, model_validator
 )
 
 from fast_keycloak.exceptions import KeycloakError
@@ -370,3 +371,96 @@ class KeycloakAuthScope(BaseModel):
     name: str
     displayName: str = ""
     iconUri: str = ""
+
+
+class KeycloakAuthPolicyType(StrEnum):
+    AGGREGATE = 'aggregate'
+    ROLE = 'role'
+    CLIENT_SCOPE = 'client-scope'
+    GROUP = 'group'
+    CLIENT = 'client'
+    REGEX = 'regex'
+    TIME = 'time'
+    USER = 'user'
+
+
+class KeycloakAuthPolicyLogic(StrEnum):
+    POSITIVE = 'POSITIVE'
+    NEGATIVE = 'NEGATIVE'
+
+
+class KeycloakAuthPolicyStrategy(StrEnum):
+    UNANIMOUS = 'UNANIMOUS'
+    AFFIRMATIVE = 'AFFIRMATIVE'
+    CONSENSUS = 'CONSENSUS'
+
+
+class IdAndRequired(BaseModel):
+    id: str
+    required: bool = False
+
+
+class KeycloakAuthPolicyGroup(BaseModel):
+    id: str
+    extendChildren: bool = False
+
+
+class KeycloakAuthPolicy(BaseModel):
+    id: Optional[str] = None
+    name: str
+    description: str = ""
+    type: KeycloakAuthPolicyType
+    logic: KeycloakAuthPolicyLogic
+    decisionStrategy: Optional[KeycloakAuthPolicyStrategy] = None
+    roles: Optional[list[IdAndRequired]] = None
+    policies: Optional[list[str]] = None
+    groupsClaim: Optional[str] = None
+    groups: Optional[list[KeycloakAuthPolicyGroup]] = None
+    clientScopes: Optional[list[IdAndRequired]] = None
+    clients: Optional[list[str]] = None
+    pattern: Optional[str] = None
+    targetClaim: Optional[str] = None
+    dayMonth: Optional[int] = Field(default=None, ge=1, le=31)
+    dayMonthEnd: Optional[int] = Field(default=None, ge=1, le=31)
+    hour: Optional[int] = Field(default=None, ge=0, le=23)
+    hourEnd: Optional[int] = Field(default=None, ge=0, le=23)
+    minute: Optional[int] = Field(default=None, ge=0, le=59)
+    minuteEnd: Optional[int] = Field(default=None, ge=0, le=59)
+    month: Optional[int] = Field(default=None, ge=1, le=12)
+    monthEnd: Optional[int] = Field(default=None, ge=1, le=12)
+    notBefore: Optional[datetime] = None
+    notOnOrAfter: Optional[datetime] = None
+    users: Optional[list[str]] = None
+    config: Optional[dict[str, str]] = None
+
+    @model_validator(mode='after')
+    def validate_required_fields(self) -> 'KeycloakAuthPolicy':
+        if self.type == KeycloakAuthPolicyType.AGGREGATE:
+            if not self.decisionStrategy:
+                raise ValueError('decisionStrategy is required with aggregate policy')
+        elif self.type == KeycloakAuthPolicyType.ROLE:
+            if not self.roles and self.config is None:
+                raise ValueError('roles is required with role policy')
+        elif self.type == KeycloakAuthPolicyType.GROUP:
+            if not self.groups and self.config is None:
+                raise ValueError('groups is required with group policy')
+        elif self.type == KeycloakAuthPolicyType.CLIENT_SCOPE:
+            if not self.clientScopes and self.config is None:
+                raise ValueError('clientScopes is required with client-scope policy')
+        elif self.type == KeycloakAuthPolicyType.CLIENT:
+            if not self.clients and self.config is None:
+                raise ValueError('clients is required with client policy')
+        elif self.type == KeycloakAuthPolicyType.REGEX:
+            if not self.targetClaim:
+                raise ValueError('targetClaim is required with regex policy')
+            if not self.pattern:
+                raise ValueError('pattern is required with regex policy')
+        elif self.type == KeycloakAuthPolicyType.TIME:
+            if not self.notBefore:
+                raise ValueError('notBefore is required with time policy')
+            if not self.notOnOrAfter:
+                raise ValueError('notOnOrAfter is not required with time policy')
+        else:  # User Policy
+            if not self.users and self.config is None:
+                raise ValueError('users is required with user policy')
+        return self
