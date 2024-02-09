@@ -1112,61 +1112,54 @@ class FastKeycloak:
         return requests.post(url=self.token_uri, headers=headers, data=data, timeout=self.timeout)
 
     @result_or_error(response_model=models.KeycloakAuthScope, is_list=True)
-    def list_auth_scopes(self, client_id: str) -> List[models.KeycloakAuthScope]:
+    def list_auth_scopes(self) -> List[models.KeycloakAuthScope]:
         return self._admin_request(
-            url=f"{self.auth_scope_uri(client_id)}?deep=false",
-            method=models.HTTPMethod.GET
+            url=f"{self.auth_scope_uri}?deep=false", method=models.HTTPMethod.GET
         )
 
     @result_or_error(response_model=models.KeycloakAuthScope)
-    def get_auth_scope(self, client_id: str, auth_scope_uuid: str) -> models.KeycloakAuthScope:
+    def get_auth_scope(self, auth_scope_uuid: str) -> models.KeycloakAuthScope:
         return self._admin_request(
-            url=f"{self.auth_scope_uri(client_id)}/{auth_scope_uuid}?deep=false",
-            method=models.HTTPMethod.GET
+            url=f"{self.auth_scope_uri}/{auth_scope_uuid}?deep=false", method=models.HTTPMethod.GET
         )
 
     @result_or_error(response_model=models.KeycloakAuthScope, is_list=True)
-    def search_auth_scopes(self, client_id: str, auth_scope_name: str) -> List[models.KeycloakAuthScope]:
+    def search_auth_scopes(self, auth_scope_name: str) -> List[models.KeycloakAuthScope]:
         return self._admin_request(
-            url=f"{self.auth_scope_uri(client_id)}?name={auth_scope_name}&deep=false",
+            url=f"{self.auth_scope_uri}?name={auth_scope_name}&deep=false",
             method=models.HTTPMethod.GET
         )
 
-    def get_auth_scope_by_name(self, client_id: str, auth_scope_name: str) -> Optional[models.KeycloakAuthScope]:
-        results = self.search_auth_scopes(client_id, auth_scope_name)
+    def get_auth_scope_by_name(self, auth_scope_name: str) -> Optional[models.KeycloakAuthScope]:
+        results = self.search_auth_scopes(auth_scope_name)
         for result in results:
             if result.name == auth_scope_name:
                 return result
         return None
 
     @result_or_error(response_model=models.KeycloakAuthScope)
-    def create_auth_scope(self, client_id: str, scope: models.KeycloakAuthScope) -> models.KeycloakAuthScope:
+    def create_auth_scope(self, scope: models.KeycloakAuthScope) -> models.KeycloakAuthScope:
         return self._admin_request(
-            url=self.auth_scope_uri(client_id),
-            data=scope.model_dump(),
-            method=models.HTTPMethod.POST
+            url=self.auth_scope_uri, data=scope.model_dump(), method=models.HTTPMethod.POST
         )
 
     @result_or_error(response_model=models.KeycloakAuthScope)
-    def update_auth_scope(self, client_id: str, scope: models.KeycloakAuthScope) -> models.KeycloakAuthScope:
+    def update_auth_scope(self, scope: models.KeycloakAuthScope) -> models.KeycloakAuthScope:
         if scope.id is None:
             raise KeycloakError(status_code=HTTPStatus.BAD_REQUEST, reason="Missing id for scope")
 
         response = self._admin_request(
-            url=f"{self.auth_scope_uri(client_id)}/{scope.id}",
-            data=scope.model_dump(),
-            method=models.HTTPMethod.PUT
+            url=f"{self.auth_scope_uri}/{scope.id}", data=scope.model_dump(), method=models.HTTPMethod.PUT
         )
         if response.status_code == 204:
-            return self.get_auth_scope(client_id, scope.id)
+            return self.get_auth_scope(scope.id)
         else:
             return response
 
     @result_or_error()
-    def delete_auth_scope(self, client_id: str, scope_id: str):
+    def delete_auth_scope(self, scope_id: str):
         return self._admin_request(
-            url=f"{self.auth_scope_uri(client_id)}/{scope_id}",
-            method=models.HTTPMethod.DELETE
+            url=f"{self.auth_scope_uri}/{scope_id}", method=models.HTTPMethod.DELETE
         )
 
     def _admin_request(
@@ -1262,6 +1255,10 @@ class FastKeycloak:
         """The endpoint that returns all configured identity providers"""
         return self.admin_uri(resource="identity-provider/instances")
 
+    @functools.cached_property
+    def client_uuid(self) -> str:
+        return self.get_client_by_id(self.client_id).id
+
     def admin_uri(self, resource: str):
         """Returns a admin resource URL"""
         return f"{self._admin_uri}/{resource}"
@@ -1314,11 +1311,12 @@ class FastKeycloak:
             token=token, key=self.public_key, options=options, audience=audience
         )
 
-    def _resource_server_uri(self, client_id: str, resource: str) -> str:
-        return self.admin_uri(f"clients/{client_id}/authz/resource-server/{resource}")
+    def _resource_server_uri(self, resource: str) -> str:
+        return self.admin_uri(f"clients/{self.client_uuid}/authz/resource-server/{resource}")
 
-    def auth_scope_uri(self, client_id: str) -> str:
-        return self._resource_server_uri(client_id, 'scope')
+    @functools.cached_property
+    def auth_scope_uri(self) -> str:
+        return self._resource_server_uri('scope')
 
     def __str__(self):
         """String representation"""
