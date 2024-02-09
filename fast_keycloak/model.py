@@ -363,3 +363,10 @@ class KeycloakGroup(BaseModel):
 
 
 KeycloakGroup.update_forward_refs()
+
+
+class KeycloakAuthScope(BaseModel):
+    id: Optional[str] = None
+    name: str
+    displayName: str = ""
+    iconUri: str = ""

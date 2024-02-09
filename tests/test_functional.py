@@ -17,7 +17,7 @@ from fast_keycloak.model import (
     KeycloakRole,
     KeycloakToken,
     KeycloakUser,
-    OIDCUser, KeycloakClient, KeycloakClientProtocol,
+    OIDCUser, KeycloakClient, KeycloakClientProtocol, KeycloakAuthScope,
 )
 from tests import BaseTestClass
 
@@ -449,6 +449,35 @@ class TestAPIFunctional(BaseTestClass):
 
         idp.delete_group(group_id=foo_group.id)
         idp.delete_user(user_id=user.id)
+
+    def test_auth_scopes(self, idp):
+        client_id = '9a76b2ec-b33e-40b0-9cad-e00ca7e77e40'
+        scope = idp.create_auth_scope(client_id, KeycloakAuthScope(name="scope"))
+        assert scope is not None
+        assert scope.id is not None
+        assert scope.name == "scope"
+
+        scope.name = "scope1"
+        scope1 = idp.update_auth_scope(client_id, scope)
+        assert scope1 is not None
+        assert scope1.name == "scope1"
+        assert scope1.id == scope.id
+
+        scope2 = idp.create_auth_scope(client_id, KeycloakAuthScope(name="scope2"))
+
+        all_scopes = idp.list_auth_scopes(client_id)
+        assert len(all_scopes) == 2
+
+        scope = idp.get_auth_scope(client_id, scope2.id)
+        assert scope is not None
+        assert scope.id == scope2.id
+
+        scope = idp.get_auth_scope_by_name(client_id, scope1.name)
+        assert scope is not None
+        assert scope.id == scope1.id
+
+        scope = idp.get_auth_scope_by_name(client_id, "notexistingscope")
+        assert scope is None
 
     @pytest.mark.parametrize(
         "action, exception",
