@@ -1,6 +1,6 @@
 # FastAPI Keycloak Integration
 
-[![Test-Suite](https://github.com/cyberionsys/fast-keycloak/actions/workflows/tests.yaml/badge.svg)](https://github.com/cyberionsys/fast-keycloak/actions/workflows/tests.yaml)
+[![Test-Suite](https://github.com/cyberionsys/fast-keycloak/actions/workflows/tests.yml/badge.svg)](https://github.com/cyberionsys/fast-keycloak/actions/workflows/tests.yaml)
 [![codecov](https://codecov.io/gh/cyberionsys/fast-keycloak/branch/master/graph/badge.svg?token=PX6NJBDUJ9)](https://codecov.io/gh/cyberionsys/fast-keycloak)
 ![Py3.12](https://img.shields.io/badge/-Python%203.12-brightgreen)
 [![CodeQL](https://github.com/cyberionsys/fast-keycloak/actions/workflows/codeql.yml/badge.svg)](https://github.com/cyberionsys/fast-keycloak/actions/workflows/codeql.yml)
