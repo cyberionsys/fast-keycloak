@@ -1228,6 +1228,48 @@ class FastKeycloak:
     def delete_auth_policy(self, policy_id: str):
         return self._admin_request(url=f"{self.auth_policy_uri}/{policy_id}", method=models.HTTPMethod.DELETE)
 
+    @result_or_error(response_model=models.KeycloakAuthResource, is_list=True)
+    def list_auth_resources(self) -> List[models.KeycloakAuthResource]:
+        return self._admin_request(url=f"{self.auth_resource_uri}", method=models.HTTPMethod.GET)
+
+    @result_or_error(response_model=models.KeycloakAuthResource)
+    def get_auth_resource(self, resource_id: str) -> models.KeycloakAuthResource:
+        return self._admin_request(url=f"{self.auth_resource_uri}/{resource_id}", method=models.HTTPMethod.GET)
+
+    @result_or_error(response_model=models.KeycloakAuthResource)
+    def create_auth_resource(self, resource: models.KeycloakAuthResource) -> models.KeycloakAuthResource:
+        data = {
+            key: value for key, value in resource.model_dump(by_alias=True).items()
+            if value is not None
+        }
+        return self._admin_request(
+            url=self.auth_resource_uri, data=data, method=models.HTTPMethod.POST
+        )
+
+    @result_or_error(response_model=models.KeycloakAuthResource)
+    def update_auth_resource(self, resource: models.KeycloakAuthResource) -> models.KeycloakAuthResource:
+        if not resource.id:
+            raise KeycloakError(status_code=HTTPStatus.BAD_REQUEST, reason="ID not found for policy")
+
+        data = {
+            key: value for key, value in resource.model_dump(by_alias=True).items()
+            if value is not None
+        }
+        response = self._admin_request(
+            url=f"{self.auth_resource_uri}/{resource.id}",
+            method=models.HTTPMethod.PUT,
+            data=data
+        )
+
+        if response.status_code == 204:
+            return self.get_auth_resource(resource.id)
+        else:
+            return response
+
+    @result_or_error()
+    def delete_auth_resource(self, resource_id: str) -> models.KeycloakAuthResource:
+        return self._admin_request(url=f"{self.auth_resource_uri}/{resource_id}", method=models.HTTPMethod.DELETE)
+
     def _admin_request(
             self,
             url: str,
@@ -1390,6 +1432,10 @@ class FastKeycloak:
 
     def auth_policy_typed_uri(self, policy_type: models.KeycloakAuthPolicyType) -> str:
         return f"{self.auth_policy_uri}/{policy_type}"
+
+    @functools.cached_property
+    def auth_resource_uri(self) -> str:
+        return self._resource_server_uri('resource')
 
     def __str__(self):
         """String representation"""

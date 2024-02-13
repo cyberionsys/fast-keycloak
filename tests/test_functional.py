@@ -18,7 +18,7 @@ from fast_keycloak.model import (
     KeycloakToken,
     KeycloakUser,
     OIDCUser, KeycloakClient, KeycloakClientProtocol, KeycloakAuthScope, KeycloakAuthPolicy, KeycloakAuthPolicyLogic,
-    KeycloakAuthPolicyType, IdAndRequired, KeycloakAuthPolicyStrategy,
+    KeycloakAuthPolicyType, IdAndRequired, KeycloakAuthPolicyStrategy, KeycloakAuthResource,
 )
 from tests import BaseTestClass
 
@@ -451,7 +451,8 @@ class TestAPIFunctional(BaseTestClass):
         idp.delete_group(group_id=foo_group.id)
         idp.delete_user(user_id=user.id)
 
-    def test_auth_scopes(self, idp):
+    @pytest.fixture()
+    def auth_scopes(self, idp):
         scope = idp.create_auth_scope(KeycloakAuthScope(name="scope"))
         assert scope is not None
         assert scope.id is not None
@@ -478,6 +479,7 @@ class TestAPIFunctional(BaseTestClass):
 
         scope = idp.get_auth_scope_by_name("notexistingscope")
         assert scope is None
+        return scope1, scope2
 
     def test_auth_policies(self, idp, users):
         # Create a client policy
@@ -565,6 +567,50 @@ class TestAPIFunctional(BaseTestClass):
             assert policy in aggregate_policy.policies
 
         idp.delete_auth_policy(aggregate_policy.id)
+
+    def test_auth_resources(self, idp, auth_scopes):
+        resource = KeycloakAuthResource(
+            name="resource1",
+            type="urn:test-client:resources:resource1",
+            uris=["/resource1/*"],
+            attributes={"attribute1": "value1"}
+        )
+        resource1 = idp.create_auth_resource(resource)
+        assert resource1 is not None
+        assert resource1.id is not None
+        assert resource1.type == "urn:test-client:resources:resource1"
+        assert resource1.attributes is not None
+        assert resource1.attributes["attribute1"][0] == "value1"
+
+        scope1, scope2 = auth_scopes
+        resource = KeycloakAuthResource(
+            name="resource2",
+            uris=["/resource2/*"],
+            scopes=[scope1, scope2]
+        )
+        resource2 = idp.create_auth_resource(resource)
+        assert resource2 is not None
+        assert len(resource2.scopes) == 2
+        for scope in resource2.scopes:
+            assert scope.id in [scope1.id, scope2.id]
+
+        resource = resource2
+        resource.type = "urn:test-client:resources:resource2"
+        resource2 = idp.update_auth_resource(resource)
+        assert resource2.id == resource.id
+        assert resource2.type == "urn:test-client:resources:resource2"
+
+        all_resources = idp.list_auth_resources()
+        assert len(all_resources) == 2
+        for resource in all_resources:
+            assert resource.id in [resource1.id, resource2.id]
+
+        resource = idp.get_auth_resource(resource1.id)
+        assert resource is not None
+        assert resource.id == resource1.id
+
+        idp.delete_auth_resource(resource1.id)
+        idp.delete_auth_resource(resource2.id)
 
     @pytest.mark.parametrize(
         "action, exception",

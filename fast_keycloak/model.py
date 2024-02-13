@@ -464,3 +464,25 @@ class KeycloakAuthPolicy(BaseModel):
             if not self.users and self.config is None:
                 raise ValueError('users is required with user policy')
         return self
+
+
+class KeycloakAuthResourceOwner(BaseModel):
+    id: str
+    name: str
+
+
+class KeycloakAuthResource(BaseModel):
+    id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("id", "_id"),
+        serialization_alias="_id"
+    )
+    name: str
+    displayName: str = ""
+    type: str = ""
+    uris: List[str]
+    scopes: Optional[list[KeycloakAuthScope]] = None
+    icon_uri: str = ""
+    ownerManagedAccess: bool = False
+    attributes: Optional[dict[str, Any]] = None
+    owner: Optional[KeycloakAuthResourceOwner] = None
