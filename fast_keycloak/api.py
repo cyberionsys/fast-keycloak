@@ -1339,6 +1339,11 @@ class FastKeycloak:
         return self.admin_uri(resource="users")
 
     @functools.cached_property
+    def userinfo_uri(self):
+        """The token endpoint URL"""
+        return self.open_id_configuration.get("userinfo_endpoint")
+
+    @functools.cached_property
     def roles_uri(self):
         """The roles endpoint URL"""
         return self.admin_uri(resource="roles")

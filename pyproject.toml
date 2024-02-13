@@ -36,6 +36,7 @@ repository = "https://github.com/cyberionsys/fast-keycloak"
 keywords = ["fastapi", "keycloak"]
 
 [tool.poetry.dependencies]
+email-validator = "^2.1.0.post1"
 fastapi = "^0.109.0"
 pydantic = "^2.6.0"
 python = "^3.12"

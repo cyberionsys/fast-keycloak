@@ -6,8 +6,10 @@ from pydantic import (
     AliasChoices,
     BaseModel as PydanticBaseModel,
     ConfigDict,
+    EmailStr,
     Field,
-    SecretStr, model_validator
+    SecretStr,
+    model_validator
 )
 
 from fast_keycloak.exceptions import KeycloakError
@@ -157,7 +159,7 @@ class KeycloakUser(BaseModel):
         emailVerified (bool):
         firstName (Optional[str]):
         lastName (Optional[str]):
-        email (Optional[str]):
+        email (Optional[EmailStr]):
         disableableCredentialTypes (List[str]):
         requiredActions (List[str]):
         realmRoles (List[str]):
@@ -177,7 +179,7 @@ class KeycloakUser(BaseModel):
     emailVerified: bool
     firstName: Optional[str] = None
     lastName: Optional[str] = None
-    email: Optional[str] = None
+    email: Optional[EmailStr] = None
     disableableCredentialTypes: List[str]
     requiredActions: List[str]
     realmRoles: Optional[List[str]] = None
@@ -210,7 +212,7 @@ class OIDCUser(BaseModel):
         name (Optional[str]):
         given_name (Optional[str]):
         family_name (Optional[str]):
-        email (Optional[str]):
+        email (Optional[EmailStr]):
         preferred_username (Optional[str]):
         realm_access (dict):
         resource_access (dict):
@@ -229,7 +231,7 @@ class OIDCUser(BaseModel):
     name: Optional[str] = None
     given_name: Optional[str] = None
     family_name: Optional[str] = None
-    email: Optional[str] = None
+    email: Optional[EmailStr] = None
     preferred_username: Optional[str] = None
     realm_access: Optional[dict] = None
     resource_access: Optional[dict] = None
