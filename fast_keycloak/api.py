@@ -60,10 +60,10 @@ def result_or_error(
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
             def create_list(json_data: List[dict]):
-                return [response_model.parse_obj(entry) for entry in json_data]
+                return [response_model.model_validate(entry) for entry in json_data]
 
             def create_object(json_data: dict):
-                return response_model.parse_obj(json_data)
+                return response_model.model_validate(json_data)
 
             result: Response = f(*args, **kwargs)  # The actual call
 
@@ -110,6 +110,7 @@ def result_or_error(
     return inner
 
 
+# noinspection PyTypeChecker
 class FastKeycloak:
     """Instance to wrap the Keycloak API with FastAPI
 
@@ -269,7 +270,7 @@ class FastKeycloak:
                 HTTPException: If any role required is not contained within the roles of the users
             """
             decoded_token = self._decode_token(token=str(token), audience="account")
-            user = models.OIDCUser.parse_obj(decoded_token)
+            user = models.OIDCUser.model_validate(decoded_token)
             if required_roles:
                 for role in required_roles:
                     if role not in user.roles:
@@ -382,10 +383,10 @@ class FastKeycloak:
 
     @result_or_error(response_model=models.KeycloakClient, is_list=True)
     def list_clients(self) -> List[models.KeycloakClient]:
-        """List clients
+        """List all clients in realm
 
         Returns:
-            list: list of clients
+            list[KeycloakClient]: list of clients
 
         Raises:
             KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
@@ -400,7 +401,7 @@ class FastKeycloak:
             uuid str: the client UUID
 
         Returns:
-            models.KeycloakClient:The corresponding client
+            KeycloakClient:The corresponding client
 
         Raises:
             KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
@@ -409,6 +410,17 @@ class FastKeycloak:
 
     @result_or_error(response_model=models.KeycloakClient, is_list=True, pick_list_item=0)
     def get_client_by_id(self, client_id: str) -> models.KeycloakClient:
+        """Get the client with the specified client_id (not UUID)
+
+        Args:
+            client_id str: the client ID (not uuid)
+
+        Returns:
+            KeycloakClient:The corresponding client
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         return self._admin_request(url=f"{self.clients_uri}?clientId={client_id}", method=models.HTTPMethod.GET)
 
     @result_or_error(response_model=models.KeycloakClient)
@@ -416,18 +428,15 @@ class FastKeycloak:
         """Create a client on the realm
 
         Args:
-            client (models.KeycloakClient): Keycloak client data
+            client (KeycloakClient): Keycloak client data
 
         Returns:
-            models.KeycloakClient: If creation succeeded, else it will return the error
+            KeycloakClient: If creation succeeded, else it will return the error
 
         Raises:
             KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
         """
-        data = {
-            key: value for key, value in client.model_dump(by_alias=True).items()
-            if value is not None
-        }
+        data = FastKeycloak._build_data(client, True)
         response = self._admin_request(url=self.clients_uri, data=data, method=models.HTTPMethod.POST)
         if response.status_code == 201:
             return self.get_client_by_id(client.clientId)
@@ -436,13 +445,21 @@ class FastKeycloak:
 
     @result_or_error(response_model=models.KeycloakClient)
     def update_client(self, client: models.KeycloakClient) -> models.KeycloakClient:
+        """Update a client on the realm
+
+        Args:
+            client (KeycloakClient): Keycloak client data
+
+        Returns:
+            KeycloakClient: If creation succeeded, else it will return the error
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         if client.id is None:
             raise KeycloakError(status_code=HTTPStatus.BAD_REQUEST, reason="Client UUID is required")
 
-        data = {
-            key: value for key, value in client.model_dump(by_alias=True).items()
-            if value is not None
-        }
+        data = FastKeycloak._build_data(client, True)
         response = self._admin_request(url=f"{self.clients_uri}/{client.id}", data=data, method=models.HTTPMethod.PUT)
         if response.status_code == 204:
             return self.get_client_by_uuid(client.id)
@@ -587,7 +604,7 @@ class FastKeycloak:
         """Get all base groups of the Keycloak realm
 
         Returns:
-            List[models.KeycloakGroup]: All base groups of the realm
+            List[KeycloakGroup]: All base groups of the realm
 
         Raises:
             KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
@@ -602,7 +619,7 @@ class FastKeycloak:
             group_names (List[str]): Groups that should be looked up (names)
 
         Returns:
-            List[models.KeycloakGroup]: Full entries stored at Keycloak. Or None if the list of requested groups is None
+            List[KeycloakGroup]: Full entries stored at Keycloak. Or None if the list of requested groups is None
 
         Raises:
             KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
@@ -620,7 +637,7 @@ class FastKeycloak:
             group_id (str): Group id to be found
 
         Returns:
-             models.KeycloakGroup: Keycloak object by id. Or None if the id is invalid
+             KeycloakGroup: Keycloak object by id. Or None if the id is invalid
 
         Notes:
             - The Keycloak RestAPI will only identify GroupRepresentations that
@@ -632,7 +649,18 @@ class FastKeycloak:
         return self._admin_request(url=f"{self.groups_uri}/{group_id}", method=models.HTTPMethod.GET)
 
     @result_or_error(response_model=models.KeycloakGroup, is_list=True)
-    def _retrieve_subgroups(self, group: models.KeycloakGroup) -> List[models.KeycloakGroup] | None:
+    def _retrieve_subgroups(self, group: models.KeycloakGroup) -> Optional[List[models.KeycloakGroup]]:
+        """Retrieve subgroups of a group
+
+        Args:
+            group (KeycloakGroup): Parent Group
+
+        Returns:
+             Optional[List[KeycloakGroup]]: Optional list of subgroups
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         if group is None or group.subGroupCount == 0:
             return
 
@@ -640,22 +668,22 @@ class FastKeycloak:
 
     @result_or_error(response_model=models.KeycloakGroup, is_list=True)
     def _search_group(self, group_name: str) -> List[models.KeycloakGroup]:
-        """Return Group or root Group based on path
+        """Search groups based on their name
 
         Args:
-            group_name (str): Path that should be looked up
+            group_name (str): Group name to be found
 
         Returns:
-            List[models.KeycloakGroup]: List of:
-                - Group if root group
-                - Top parent Group for nested path
+             List[KeycloakGroup]: list of groups having that name
+
+        Note:
+            Keycloak allow creating many groups with same name
 
         Raises:
             KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
         """
         return self._admin_request(
-            url=f"{self.groups_uri}?search={group_name}&exact=true",
-            method=models.HTTPMethod.GET
+            url=f"{self.groups_uri}?search={group_name}&exact=true", method=models.HTTPMethod.GET
         )
 
     @result_or_error(response_model=models.KeycloakGroup)
@@ -667,7 +695,7 @@ class FastKeycloak:
             with_parents (bool): Return the group with its parent(s)
 
         Returns:
-            models.KeycloakGroup: Full entries stored at Keycloak. Or None if the path not found
+            KeycloakGroup: Full entries stored at Keycloak. Or None if the path not found
 
         Raises:
             KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
@@ -715,7 +743,7 @@ class FastKeycloak:
             user_id (str): ID of the user of interest
 
         Returns:
-            List[models.KeycloakGroup]: All groups possessed by the user
+            List[KeycloakGroup]: All groups possessed by the user
 
         Raises:
             KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
@@ -730,7 +758,7 @@ class FastKeycloak:
             group_id (str): ID of the group of interest
 
         Returns:
-            List[models.KeycloakUser]: All users in the group. Note that
+            List[KeycloakUser]: All users in the group. Note that
             the user objects returned are not fully populated.
 
         Raises:
@@ -768,7 +796,7 @@ class FastKeycloak:
             parent (Union[models.KeycloakGroup, str]): Can contain an instance or object id
 
         Returns:
-            models.KeycloakGroup: If creation succeeded, else it will return the error
+            KeycloakGroup: If creation succeeded, else it will return the error
 
         Raises:
             KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
@@ -836,7 +864,7 @@ class FastKeycloak:
             attributes (dict): attributes of new user
 
         Returns:
-            models.KeycloakUser: If the creation succeeded
+            KeycloakUser: If the creation succeeded
 
         Notes:
             - Also triggers the email verification email
@@ -927,7 +955,7 @@ class FastKeycloak:
             query: Query string. e.g. `email=testuser@codespecialist.com` or `username=codespecialist`
 
         Returns:
-            models.KeycloakUser: If the user was found
+            KeycloakUser: If the user was found
 
         Raises:
             KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
@@ -958,10 +986,10 @@ class FastKeycloak:
         """Updates a user. Requires the whole object.
 
         Args:
-            user (models.KeycloakUser): The (new) user object
+            user (KeycloakUser): The (new) user object
 
         Returns:
-            models.KeycloakUser: The updated user
+            KeycloakUser: The updated user
 
         Raises:
             KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
@@ -978,7 +1006,7 @@ class FastKeycloak:
 
     @result_or_error()
     def delete_user(self, user_id: str) -> dict:
-        """Deletes an user
+        """Deletes a user
 
         Args:
             user_id (str): The user ID of interest
@@ -995,11 +1023,11 @@ class FastKeycloak:
         )
 
     @result_or_error(response_model=models.KeycloakUser, is_list=True)
-    def get_all_users(self) -> List[models.KeycloakUser]:
+    def list_users(self) -> List[models.KeycloakUser]:
         """Returns all users of the realm
 
         Returns:
-            List[models.KeycloakUser]: All Keycloak users of the realm
+            List[KeycloakUser]: All Keycloak users of the realm
 
         Raises:
             KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
@@ -1011,7 +1039,7 @@ class FastKeycloak:
         """Returns all configured identity Providers
 
         Returns:
-            List[models.KeycloakIdentityProvider]: All configured identity providers
+            List[KeycloakIdentityProvider]: All configured identity providers
 
         Raises:
             KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
@@ -1028,7 +1056,7 @@ class FastKeycloak:
             password (str): Password of the user
 
         Returns:
-            models.KeycloakToken: If the exchange succeeds
+            KeycloakToken: If the exchange succeeds
 
         Raises:
             HTTPException: If the credentials did not match any user
@@ -1095,7 +1123,7 @@ class FastKeycloak:
             code (str): The authorization code
 
         Returns:
-            models.KeycloakToken: If the exchange succeeds
+            KeycloakToken: If the exchange succeeds
 
         Raises:
             KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
@@ -1113,24 +1141,65 @@ class FastKeycloak:
 
     @result_or_error(response_model=models.KeycloakAuthScope, is_list=True)
     def list_auth_scopes(self) -> List[models.KeycloakAuthScope]:
+        """Returns all authorization scopes defined for the client
+
+        Returns:
+            List[KeycloakAuthScope]: All Keycloak authorization scopes of the client
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         return self._admin_request(
             url=f"{self.auth_scope_uri}?deep=false", method=models.HTTPMethod.GET
         )
 
     @result_or_error(response_model=models.KeycloakAuthScope)
     def get_auth_scope(self, auth_scope_uuid: str) -> models.KeycloakAuthScope:
+        """Queries the keycloak API for a specific authorization scope based on its UUID
+
+        Args:
+            auth_scope_uuid (str): The authorization scope UUID of interest
+
+        Returns:
+            KeycloakAuthScope: If the authorization scope was found
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         return self._admin_request(
             url=f"{self.auth_scope_uri}/{auth_scope_uuid}?deep=false", method=models.HTTPMethod.GET
         )
 
     @result_or_error(response_model=models.KeycloakAuthScope, is_list=True)
     def search_auth_scopes(self, auth_scope_name: str) -> List[models.KeycloakAuthScope]:
+        """Search authorization scopes based on their name
+
+        Args:
+            auth_scope_name (str): Authorization scope name to be found
+
+        Returns:
+             List[KeycloakAuthScope]: list of authorization scope having that name
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         return self._admin_request(
             url=f"{self.auth_scope_uri}?name={auth_scope_name}&deep=false",
             method=models.HTTPMethod.GET
         )
 
     def get_auth_scope_by_name(self, auth_scope_name: str) -> Optional[models.KeycloakAuthScope]:
+        """Queries the keycloak API for a specific authorization scope based on its name
+
+        Args:
+            auth_scope_name (str): The authorization scope name
+
+        Returns:
+            KeycloakAuthScope: If an authorization scope with that specific name was found
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         results = self.search_auth_scopes(auth_scope_name)
         for result in results:
             if result.name == auth_scope_name:
@@ -1139,12 +1208,34 @@ class FastKeycloak:
 
     @result_or_error(response_model=models.KeycloakAuthScope)
     def create_auth_scope(self, scope: models.KeycloakAuthScope) -> models.KeycloakAuthScope:
+        """Creates a new authorization scope in client
+
+        Args:
+            scope (KeycloakAuthScope): The scope to add
+
+        Returns:
+            KeycloakAuthScope: The created authorization scope
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         return self._admin_request(
             url=self.auth_scope_uri, data=scope.model_dump(), method=models.HTTPMethod.POST
         )
 
     @result_or_error(response_model=models.KeycloakAuthScope)
     def update_auth_scope(self, scope: models.KeycloakAuthScope) -> models.KeycloakAuthScope:
+        """Updates an authorization scope in client
+
+        Args:
+            scope (KeycloakAuthScope): The scope to update
+
+        Returns:
+            KeycloakAuthScope: The updated authorization scope
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         if scope.id is None:
             raise KeycloakError(status_code=HTTPStatus.BAD_REQUEST, reason="Missing id for scope")
 
@@ -1158,12 +1249,28 @@ class FastKeycloak:
 
     @result_or_error()
     def delete_auth_scope(self, scope_id: str):
+        """Deletes an authorization scope
+
+        Args:
+            scope_id (str): the authorization scope id to delete
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         return self._admin_request(
             url=f"{self.auth_scope_uri}/{scope_id}", method=models.HTTPMethod.DELETE
         )
 
     @result_or_error(response_model=models.KeycloakAuthPolicy, is_list=True)
     def list_auth_policies(self) -> List[models.KeycloakAuthPolicy]:
+        """Returns all authorization policies defined for the client
+
+        Returns:
+            List[KeycloakAuthPolicy]: All Keycloak authorization policies of the client
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         return self._admin_request(url=f"{self.auth_policy_uri}?permission=false", method=models.HTTPMethod.GET)
 
     @result_or_error(response_model=models.KeycloakAuthPolicy)
@@ -1172,19 +1279,60 @@ class FastKeycloak:
             policy_type: models.KeycloakAuthPolicyType,
             policy_id: str
     ) -> models.KeycloakAuthPolicy:
+        """Get Authorization policy by type and uuid
+
+        Args:
+            policy_type (KeycloakAuthPolicyType): The type of the policy
+            policy_id (str): UUID of the policy
+
+        Returns:
+             KeycloakAuthPolicy: The policy if found
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         return self._admin_request(
             url=f"{self.auth_policy_typed_uri(policy_type)}/{policy_id}",
             method=models.HTTPMethod.GET
         )
 
     @result_or_error(response_model=models.KeycloakAuthPolicy, is_list=True)
-    def _get_aggregate_auth_policy_dependencies(self, policy_id: str) -> List[models.KeycloakAuthPolicy]:
+    def _get_aggregate_auth_policy_dependencies(self, policy_uuid: str) -> List[models.KeycloakAuthPolicy]:
+        """Retrieve the linked aggregated policies of an aggregate policy
+
+        Args:
+            policy_uuid (str): UUID of the policy
+
+        Returns:
+             List[KeycloakAuthPolicy]: List of aggregated policies
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         return self._admin_request(
-            url=f"{self.auth_policy_typed_uri(models.KeycloakAuthPolicyType.AGGREGATE)}/{policy_id}/associatedPolicies",
+            url=f"{self.auth_policy_typed_uri(models.KeycloakAuthPolicyType.AGGREGATE)}/{policy_uuid}/associatedPolicies",
+            method=models.HTTPMethod.GET
+        )
+
+    @result_or_error(response_model=models.KeycloakAuthPolicy, is_list=True)
+    def get_associated_policies(self, policy_uuid: str) -> List[models.KeycloakAuthPolicy]:
+        return self._admin_request(
+            url=f"{self.auth_policy_uri}/{policy_uuid}/associatedPolicies",
             method=models.HTTPMethod.GET
         )
 
     def get_aggregate_auth_policy_with_dependencies(self, policy_id: str) -> models.KeycloakAuthPolicy:
+        """Retrieve aggregate policy with linked aggregated policies
+
+        Args:
+            policy_id (str): UUID of the policy
+
+        Returns:
+             KeycloakAuthPolicy: Aggregate policy with linked policies
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         policy_type = models.KeycloakAuthPolicyType.AGGREGATE
         policy = self.get_auth_policy_by_type_and_id(policy_type, policy_id)
         # Retrieved associated policies
@@ -1194,29 +1342,43 @@ class FastKeycloak:
 
     @result_or_error(response_model=models.KeycloakAuthPolicy)
     def create_auth_policy(self, policy: models.KeycloakAuthPolicy) -> models.KeycloakAuthPolicy:
-        data = {
-            key: value for key, value in policy.model_dump().items()
-            if value is not None
-        }
+        """Creates a new authorization policy in client
+
+        Args:
+            policy (KeycloakAuthPolicy): The policy to add
+
+        Returns:
+            KeycloakAuthScope: The created authorization scope
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         return self._admin_request(
             url=f"{self.auth_policy_typed_uri(policy.type)}",
             method=models.HTTPMethod.POST,
-            data=data
+            data=FastKeycloak._build_data(policy)
         )
 
     @result_or_error(response_model=models.KeycloakAuthPolicy)
     def update_auth_policy(self, policy: models.KeycloakAuthPolicy) -> models.KeycloakAuthPolicy:
+        """Updates a new authorization policy in client
+
+        Args:
+            policy (KeycloakAuthPolicy): The policy to update
+
+        Returns:
+            KeycloakAuthScope: The updated authorization scope
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         if not policy.id:
             raise KeycloakError(status_code=HTTPStatus.BAD_REQUEST, reason="ID not found for policy")
 
-        data = {
-            key: value for key, value in policy.model_dump().items()
-            if value is not None
-        }
         response = self._admin_request(
             url=f"{self.auth_policy_typed_uri(policy.type)}/{policy.id}",
             method=models.HTTPMethod.PUT,
-            data=data
+            data=FastKeycloak._build_data(policy)
         )
 
         if response.status_code == 201:
@@ -1226,35 +1388,78 @@ class FastKeycloak:
 
     @result_or_error()
     def delete_auth_policy(self, policy_id: str):
+        """Deletes an authorization policy in client
+
+        Args:
+            policy_id (str): The id of the authorization policy to delete
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         return self._admin_request(url=f"{self.auth_policy_uri}/{policy_id}", method=models.HTTPMethod.DELETE)
 
     @result_or_error(response_model=models.KeycloakAuthResource, is_list=True)
     def list_auth_resources(self) -> List[models.KeycloakAuthResource]:
+        """Returns all authorization resources defined for the client
+
+        Returns:
+            List[KeycloakAuthResource]: All Keycloak authorization resources of the client
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         return self._admin_request(url=f"{self.auth_resource_uri}", method=models.HTTPMethod.GET)
 
     @result_or_error(response_model=models.KeycloakAuthResource)
-    def get_auth_resource(self, resource_id: str) -> models.KeycloakAuthResource:
-        return self._admin_request(url=f"{self.auth_resource_uri}/{resource_id}", method=models.HTTPMethod.GET)
+    def get_auth_resource(self, resource_uuid: str) -> models.KeycloakAuthResource:
+        """Queries the keycloak API for a specific authorization resource based on its UUID
+
+        Args:
+            resource_uuid (str): The authorization resource UUID of interest
+
+        Returns:
+            KeycloakAuthResource: If the resource as found
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
+        return self._admin_request(url=f"{self.auth_resource_uri}/{resource_uuid}", method=models.HTTPMethod.GET)
 
     @result_or_error(response_model=models.KeycloakAuthResource)
     def create_auth_resource(self, resource: models.KeycloakAuthResource) -> models.KeycloakAuthResource:
-        data = {
-            key: value for key, value in resource.model_dump(by_alias=True).items()
-            if value is not None
-        }
+        """Creates a new authorization resource in client
+
+        Args:
+            resource (KeycloakAuthResource): The resource to add
+
+        Returns:
+            KeycloakAuthResource: The created authorization resource
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         return self._admin_request(
-            url=self.auth_resource_uri, data=data, method=models.HTTPMethod.POST
+            url=self.auth_resource_uri, method=models.HTTPMethod.POST,
+            data=FastKeycloak._build_data(resource, True)
         )
 
     @result_or_error(response_model=models.KeycloakAuthResource)
     def update_auth_resource(self, resource: models.KeycloakAuthResource) -> models.KeycloakAuthResource:
+        """Updates a new authorization resource in client
+
+        Args:
+            resource (KeycloakAuthResource): The resource to update
+
+        Returns:
+            KeycloakAuthResource: The updated authorization resource
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         if not resource.id:
             raise KeycloakError(status_code=HTTPStatus.BAD_REQUEST, reason="ID not found for policy")
 
-        data = {
-            key: value for key, value in resource.model_dump(by_alias=True).items()
-            if value is not None
-        }
+        data = FastKeycloak._build_data(resource, True)
         response = self._admin_request(
             url=f"{self.auth_resource_uri}/{resource.id}",
             method=models.HTTPMethod.PUT,
@@ -1268,7 +1473,148 @@ class FastKeycloak:
 
     @result_or_error()
     def delete_auth_resource(self, resource_id: str) -> models.KeycloakAuthResource:
+        """Deletes an authorization resource in client
+
+        Args:
+            resource_id (str): The id of the authorization resource to delete
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
         return self._admin_request(url=f"{self.auth_resource_uri}/{resource_id}", method=models.HTTPMethod.DELETE)
+
+    @result_or_error(response_model=models.KeycloakAuthPermission, is_list=True)
+    def list_auth_permissions(self) -> List[models.KeycloakAuthPermission]:
+        """Returns all authorization permissions defined for the client
+
+        Returns:
+            List[KeycloakAuthPermission]: All Keycloak authorization permissions of the client
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
+        return self._admin_request(url=self._auth_permission_uri, method=models.HTTPMethod.GET)
+
+    @result_or_error(response_model=models.KeycloakAuthPermission)
+    def get_auth_permission(self, permission_uuid: str) -> models.KeycloakAuthPermission:
+        """Queries the keycloak API for a specific authorization permission based on its UUID
+
+        Args:
+            permission_uuid (str): The authorization permission UUID of interest
+
+        Returns:
+            KeycloakAuthResource: If the resource as found
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
+        response = self._admin_request(
+            url=f"{self._auth_permission_uri}/{permission_uuid}", method=models.HTTPMethod.GET
+        )
+        if response.status_code == 200:
+            permission_json = response.json()
+            # Retrieve associated policies
+            policies = self.get_associated_policies(permission_uuid)
+            permission_json['policies'] = [policy.id for policy in policies]
+
+            try:
+                without_resource_type = not permission_json['resourceType']
+            except KeyError:
+                without_resource_type = True
+
+            if without_resource_type:
+                # Retrieve resources
+                response = self._admin_request(
+                    url=f"{self.auth_policy_uri}/{permission_uuid}/resources",
+                    method=models.HTTPMethod.GET
+                )
+                if response.status_code == 200:
+                    permission_json['resources'] = [resource['_id'] for resource in response.json()]
+
+            if permission_json['type'] == models.KeycloakAuthPermissionType.SCOPE.value:
+                # Retrieve scopes
+                response = self._admin_request(
+                    url=f"{self.auth_policy_uri}/{permission_uuid}/scopes",
+                    method=models.HTTPMethod.GET
+                )
+                if response.status_code == 200:
+                    permission_json['scopes'] = [scope['id'] for scope in response.json()]
+            return models.KeycloakAuthPermission.model_validate(permission_json)
+        else:
+            return response
+
+    @result_or_error(response_model=models.KeycloakAuthPermission)
+    def create_auth_permission(self, permission: models.KeycloakAuthPermission) -> models.KeycloakAuthPermission:
+        """Creates a new authorization permission in client
+
+        Args:
+            permission (KeycloakAuthPermission): The permission to add
+
+        Returns:
+            KeycloakAuthPermission: The created authorization permission
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
+        if not permission.type:
+            raise KeycloakError(status_code=HTTPStatus.BAD_REQUEST, reason="Unknown permission type")
+
+        return self._admin_request(
+            url=self.auth_permission_typed_uri(permission.type),
+            data=FastKeycloak._build_data(permission),
+            method=models.HTTPMethod.POST
+        )
+
+    @result_or_error(response_model=models.KeycloakAuthPermission)
+    def update_auth_permission(self, permission: models.KeycloakAuthPermission) -> models.KeycloakAuthPermission:
+        """Updates a new authorization permission in client
+
+        Args:
+            permission (KeycloakAuthPermission): The permission to update
+
+        Returns:
+            KeycloakAuthPermission: The updated authorization permission
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
+        if not permission.type:
+            raise KeycloakError(status_code=HTTPStatus.BAD_REQUEST, reason="Unknown permission type")
+        if not permission.id:
+            raise KeycloakError(status_code=HTTPStatus.BAD_REQUEST, reason="No permission ID found")
+
+        response = self._admin_request(
+            url=f"{self.auth_permission_typed_uri(permission.type)}/{permission.id}",
+            data=FastKeycloak._build_data(permission),
+            method=models.HTTPMethod.PUT
+        )
+        if response.status_code == 201:
+            return self.get_auth_permission(permission.id)
+        else:
+            return response
+
+    @result_or_error()
+    def delete_auth_permission(self, permission_type: str, permission_uuid: str):
+        """Deletes an authorization permission in client
+
+        Args:
+            permission_type (str): The permission type to delete
+            permission_uuid (str): The id of the authorization permission to delete
+
+        Raises:
+            KeycloakError: If the resulting response is not a successful HTTP-Code (>299)
+        """
+        return self._admin_request(
+            url=f"{self.auth_permission_typed_uri(permission_type)}/{permission_uuid}",
+            method=models.HTTPMethod.DELETE
+        )
+
+    @classmethod
+    def _build_data(cls, model: BaseModel, by_alias: bool = False) -> dict:
+        return {
+            key: value for key, value in model.model_dump(by_alias=by_alias).items()
+            if value is not None
+        }
 
     def _admin_request(
             self,
@@ -1340,7 +1686,7 @@ class FastKeycloak:
 
     @functools.cached_property
     def userinfo_uri(self):
-        """The token endpoint URL"""
+        """The userinfo endpoint URL"""
         return self.open_id_configuration.get("userinfo_endpoint")
 
     @functools.cached_property
@@ -1370,6 +1716,7 @@ class FastKeycloak:
 
     @functools.cached_property
     def client_uuid(self) -> str:
+        """Client UUID"""
         return self.get_client_by_id(self.client_id).id
 
     def admin_uri(self, resource: str):
@@ -1441,6 +1788,13 @@ class FastKeycloak:
     @functools.cached_property
     def auth_resource_uri(self) -> str:
         return self._resource_server_uri('resource')
+
+    @functools.cached_property
+    def _auth_permission_uri(self) -> str:
+        return self._resource_server_uri("permission")
+
+    def auth_permission_typed_uri(self, perm_type: models.KeycloakAuthPermissionType) -> str:
+        return f"{self._auth_permission_uri}/{perm_type}"
 
     def __str__(self):
         """String representation"""

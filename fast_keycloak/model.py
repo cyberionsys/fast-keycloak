@@ -391,7 +391,7 @@ class KeycloakAuthPolicyLogic(StrEnum):
     NEGATIVE = 'NEGATIVE'
 
 
-class KeycloakAuthPolicyStrategy(StrEnum):
+class KeycloakDecisionStrategy(StrEnum):
     UNANIMOUS = 'UNANIMOUS'
     AFFIRMATIVE = 'AFFIRMATIVE'
     CONSENSUS = 'CONSENSUS'
@@ -413,7 +413,7 @@ class KeycloakAuthPolicy(BaseModel):
     description: str = ""
     type: KeycloakAuthPolicyType
     logic: KeycloakAuthPolicyLogic
-    decisionStrategy: Optional[KeycloakAuthPolicyStrategy] = None
+    decisionStrategy: Optional[KeycloakDecisionStrategy] = None
     roles: Optional[list[IdAndRequired]] = None
     policies: Optional[list[str]] = None
     groupsClaim: Optional[str] = None
@@ -488,3 +488,30 @@ class KeycloakAuthResource(BaseModel):
     ownerManagedAccess: bool = False
     attributes: Optional[dict[str, Any]] = None
     owner: Optional[KeycloakAuthResourceOwner] = None
+
+
+class KeycloakAuthPermissionType(StrEnum):
+    RESOURCE = 'resource'
+    SCOPE = 'scope'
+
+
+class KeycloakAuthPermission(BaseModel):
+    id: Optional[str] = None
+    name: str
+    description: str = ""
+    type: Optional[KeycloakAuthPermissionType] = None
+    resources: list[str] = []
+    resourceType: Optional[str] = None
+    policies: Optional[list[str]] = None
+    scopes: Optional[list[str]] = None
+    decisionStrategy: KeycloakDecisionStrategy = KeycloakDecisionStrategy.UNANIMOUS
+
+    @model_validator(mode='after')
+    def validate_model(self) -> 'KeycloakAuthPermission':
+        if self.resourceType and self.resources:
+            raise ValueError('resourceType and resources are mutually exclusive')
+
+        if self.type == KeycloakAuthPermissionType.RESOURCE and self.scopes:
+            raise ValueError('resource permission is not compatible with scopes')
+
+        return self

@@ -2,6 +2,7 @@ from typing import List, Optional
 
 import pytest as pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from fast_keycloak import KeycloakError
 from fast_keycloak.exceptions import (
@@ -18,7 +19,8 @@ from fast_keycloak.model import (
     KeycloakToken,
     KeycloakUser,
     OIDCUser, KeycloakClient, KeycloakClientProtocol, KeycloakAuthScope, KeycloakAuthPolicy, KeycloakAuthPolicyLogic,
-    KeycloakAuthPolicyType, IdAndRequired, KeycloakAuthPolicyStrategy, KeycloakAuthResource,
+    KeycloakAuthPolicyType, IdAndRequired, KeycloakDecisionStrategy, KeycloakAuthResource, KeycloakAuthPermission,
+    KeycloakAuthPermissionType,
 )
 from tests import BaseTestClass
 
@@ -40,7 +42,7 @@ class TestAPIFunctional(BaseTestClass):
 
     @pytest.fixture()
     def users(self, idp):
-        assert idp.get_all_users() == []  # No users yet
+        assert idp.list_users() == []  # No users yet
 
         # Create some test users
         user_alice = idp.create_user(  # Create User A
@@ -53,7 +55,7 @@ class TestAPIFunctional(BaseTestClass):
             send_email_verification=False,
         )
         assert isinstance(user_alice, KeycloakUser)
-        assert len(idp.get_all_users()) == 1
+        assert len(idp.list_users()) == 1
 
         # Try to create a user with the same username
         with pytest.raises(KeycloakError):  # 'User exists with same username'
@@ -66,7 +68,7 @@ class TestAPIFunctional(BaseTestClass):
                 enabled=True,
                 send_email_verification=False,
             )
-        assert len(idp.get_all_users()) == 1
+        assert len(idp.list_users()) == 1
 
         user_bob = idp.create_user(  # Create User B
             first_name="test",
@@ -78,7 +80,7 @@ class TestAPIFunctional(BaseTestClass):
             send_email_verification=False,
         )
         assert isinstance(user_bob, KeycloakUser)
-        assert len(idp.get_all_users()) == 2
+        assert len(idp.list_users()) == 2
         return user_alice, user_bob
 
     def test_clients(self, idp):
@@ -481,7 +483,8 @@ class TestAPIFunctional(BaseTestClass):
         assert scope is None
         return scope1, scope2
 
-    def test_auth_policies(self, idp, users):
+    @pytest.fixture()
+    def auth_policies(self, idp, users):
         # Create a client policy
         policy = KeycloakAuthPolicy(
             name="Client Policy",
@@ -537,20 +540,20 @@ class TestAPIFunctional(BaseTestClass):
             name="Aggregate Policy",
             type=KeycloakAuthPolicyType.AGGREGATE,
             logic=KeycloakAuthPolicyLogic.POSITIVE,
-            decisionStrategy=KeycloakAuthPolicyStrategy.AFFIRMATIVE,
+            decisionStrategy=KeycloakDecisionStrategy.AFFIRMATIVE,
             policies=[client_policy.id, user_policy.id, role_policy.id]
         )
         aggregate_policy = idp.create_auth_policy(policy)
         assert aggregate_policy is not None
         assert aggregate_policy.id is not None
         assert aggregate_policy.logic == KeycloakAuthPolicyLogic.POSITIVE
-        assert aggregate_policy.decisionStrategy == KeycloakAuthPolicyStrategy.AFFIRMATIVE
+        assert aggregate_policy.decisionStrategy == KeycloakDecisionStrategy.AFFIRMATIVE
         assert len(aggregate_policy.policies) == 3
 
-        aggregate_policy.decisionStrategy = KeycloakAuthPolicyStrategy.UNANIMOUS
+        aggregate_policy.decisionStrategy = KeycloakDecisionStrategy.UNANIMOUS
         result = idp.update_auth_policy(aggregate_policy)
         assert result.id == aggregate_policy.id
-        assert result.decisionStrategy == KeycloakAuthPolicyStrategy.UNANIMOUS
+        assert result.decisionStrategy == KeycloakDecisionStrategy.UNANIMOUS
 
         all_policies = idp.list_auth_policies()
         assert len(all_policies) == 4
@@ -567,22 +570,29 @@ class TestAPIFunctional(BaseTestClass):
             assert policy in aggregate_policy.policies
 
         idp.delete_auth_policy(aggregate_policy.id)
+        idp.delete_auth_policy(role_policy.id)
 
-    def test_auth_resources(self, idp, auth_scopes):
+        return client_policy, user_policy
+
+    @pytest.fixture()
+    def auth_resources(self, idp, auth_scopes):
+        scope1, scope2 = auth_scopes
         resource = KeycloakAuthResource(
             name="resource1",
             type="urn:test-client:resources:resource1",
             uris=["/resource1/*"],
+            ownerManagedAccess=True,
+            scopes=[scope1],
             attributes={"attribute1": "value1"}
         )
         resource1 = idp.create_auth_resource(resource)
-        assert resource1 is not None
         assert resource1.id is not None
         assert resource1.type == "urn:test-client:resources:resource1"
-        assert resource1.attributes is not None
+        assert resource1.ownerManagedAccess is True
+        assert len(resource1.scopes) == 1
+        assert resource1.scopes[0].id == scope1.id
         assert resource1.attributes["attribute1"][0] == "value1"
 
-        scope1, scope2 = auth_scopes
         resource = KeycloakAuthResource(
             name="resource2",
             uris=["/resource2/*"],
@@ -609,8 +619,94 @@ class TestAPIFunctional(BaseTestClass):
         assert resource is not None
         assert resource.id == resource1.id
 
-        idp.delete_auth_resource(resource1.id)
         idp.delete_auth_resource(resource2.id)
+        return resource1
+
+    def test_auth_permissions(self, idp, auth_resources, auth_scopes, auth_policies):
+        # Create resource based permission
+        resource1 = auth_resources
+        client_policy, user_policy = auth_policies
+
+        permission = KeycloakAuthPermission(
+            name="Resource Permission",
+            type=KeycloakAuthPermissionType.RESOURCE,
+            resources=[resource1.id],
+            policies=[client_policy.id, user_policy.id]
+        )
+        resource_permission = idp.create_auth_permission(permission)
+        assert resource_permission.id is not None
+        assert resource_permission.decisionStrategy == KeycloakDecisionStrategy.UNANIMOUS
+        assert len(resource_permission.resources) == 1
+        assert len(resource_permission.policies) == 2
+
+        scope1, scope2 = auth_scopes
+        with pytest.raises(ValidationError):
+            # Resource permission not compatible with scopes
+            KeycloakAuthPermission(
+                name="Resource Permission",
+                type=KeycloakAuthPermissionType.RESOURCE,
+                resources=[resource1.id],
+                scopes=[scope1.id]
+            )
+
+        with pytest.raises(ValidationError):
+            # resources and resourceType are mutually exclusive
+            KeycloakAuthPermission(
+                name="Resource Permission",
+                type=KeycloakAuthPermissionType.RESOURCE,
+                resourceType="urn:Test:resources:resource1",
+                resources=[resource1.id],
+            )
+
+        # Creates a scope based permission
+        permission = KeycloakAuthPermission(
+            name="Scope Permission",
+            type=KeycloakAuthPermissionType.SCOPE,
+            resources=[resource1.id],
+            scopes=[scope1.id],
+            decisionStrategy=KeycloakDecisionStrategy.AFFIRMATIVE
+        )
+        scope_permission = idp.create_auth_permission(permission)
+        assert scope_permission.id is not None
+        assert len(scope_permission.resources) == 1
+        assert scope_permission.resources[0] == resource1.id
+        assert len(scope_permission.scopes) == 1
+        assert scope_permission.scopes[0] == scope1.id
+        assert scope_permission.decisionStrategy == KeycloakDecisionStrategy.AFFIRMATIVE
+        assert scope_permission.policies is None or len(scope_permission.policies) == 0
+
+        with pytest.raises(KeycloakError):
+            # scope2 was not in resource1 scopes so should throw error
+            permission = KeycloakAuthPermission(
+                name="Scope Permission",
+                type=KeycloakAuthPermissionType.SCOPE,
+                resources=[resource1.id],
+                scopes=[scope1.id, scope2.id],
+                policies=[client_policy.id, user_policy.id],
+                decisionStrategy=KeycloakDecisionStrategy.AFFIRMATIVE
+            )
+            idp.create_auth_permission(permission)
+
+        to_update = scope_permission
+        to_update.policies = [client_policy.id, user_policy.id]
+        to_update.decisionStrategy = KeycloakDecisionStrategy.UNANIMOUS
+        scope_permission = idp.update_auth_permission(to_update)
+
+        assert len(scope_permission.policies) == 2
+        for policy in scope_permission.policies:
+            assert policy in [client_policy.id, user_policy.id]
+        assert scope_permission.decisionStrategy == KeycloakDecisionStrategy.UNANIMOUS
+
+        all_permissions = idp.list_auth_permissions()
+        assert len(all_permissions) == 2
+        for permission in all_permissions:
+            assert permission.id in [resource_permission.id, scope_permission.id]
+
+        permission = idp.get_auth_permission(resource_permission.id)
+        assert permission.id == resource_permission.id
+
+        idp.delete_auth_permission(KeycloakAuthPermissionType.RESOURCE, resource_permission.id)
+        idp.delete_auth_permission(KeycloakAuthPermissionType.SCOPE, scope_permission.id)
 
     @pytest.mark.parametrize(
         "action, exception",
